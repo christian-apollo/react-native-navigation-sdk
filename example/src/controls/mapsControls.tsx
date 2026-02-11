@@ -22,6 +22,7 @@ import { Accordion } from './Accordion';
 
 import SelectDropdown from 'react-native-select-dropdown';
 import { ControlStyles } from '../styles/components';
+import { showSnackbar } from '../helpers/snackbar';
 import {
   MapColorScheme,
   type MapViewController,
@@ -30,30 +31,79 @@ import {
   type Circle,
   type Polyline,
   type Polygon,
+  type GroundOverlay,
 } from '@googlemaps/react-native-navigation-sdk';
 
-export type MapsControlsProps = {
+export interface MapControlsProps {
   readonly mapViewController: MapViewController;
+  readonly mapType?: MapType;
+  readonly onMapTypeChange?: (mapType: MapType) => void;
   readonly mapColorScheme?: MapColorScheme;
   readonly onMapColorSchemeChange?: (scheme: MapColorScheme) => void;
-  readonly showMessage?: (message: string) => void;
-};
+  readonly myLocationEnabled?: boolean;
+  readonly myLocationButtonEnabled?: boolean;
+  readonly onMyLocationChange?: (
+    enabled: boolean,
+    buttonEnabled: boolean
+  ) => void;
+  // UI Settings
+  readonly compassEnabled?: boolean;
+  readonly onCompassEnabledChange?: (enabled: boolean) => void;
+  readonly mapToolbarEnabled?: boolean;
+  readonly onMapToolbarEnabledChange?: (enabled: boolean) => void;
+  readonly indoorEnabled?: boolean;
+  readonly onIndoorEnabledChange?: (enabled: boolean) => void;
+  readonly indoorLevelPickerEnabled?: boolean;
+  readonly onIndoorLevelPickerEnabledChange?: (enabled: boolean) => void;
+  readonly rotateGesturesEnabled?: boolean;
+  readonly onRotateGesturesEnabledChange?: (enabled: boolean) => void;
+  readonly scrollGesturesEnabled?: boolean;
+  readonly onScrollGesturesEnabledChange?: (enabled: boolean) => void;
+  readonly scrollGesturesDuringRotateOrZoomEnabled?: boolean;
+  readonly onScrollGesturesDuringRotateOrZoomEnabledChange?: (
+    enabled: boolean
+  ) => void;
+  readonly tiltGesturesEnabled?: boolean;
+  readonly onTiltGesturesEnabledChange?: (enabled: boolean) => void;
+  readonly zoomControlsEnabled?: boolean;
+  readonly onZoomControlsEnabledChange?: (enabled: boolean) => void;
+  readonly zoomGesturesEnabled?: boolean;
+  readonly onZoomGesturesEnabledChange?: (enabled: boolean) => void;
+}
 
 export const defaultZoom: number = 15;
 
-const MapsControls = ({
+const MapsControls: React.FC<MapControlsProps> = ({
   mapViewController,
+  mapType = MapType.NORMAL,
+  onMapTypeChange,
   mapColorScheme = MapColorScheme.FOLLOW_SYSTEM,
   onMapColorSchemeChange,
-  showMessage,
-}: MapsControlsProps) => {
-  const log = (message: string) => {
-    if (showMessage) {
-      showMessage(message);
-    } else {
-      console.log(message);
-    }
-  };
+  myLocationEnabled = false,
+  myLocationButtonEnabled: _myLocationButtonEnabled = true,
+  onMyLocationChange,
+  // UI Settings
+  compassEnabled = true,
+  onCompassEnabledChange,
+  mapToolbarEnabled = true,
+  onMapToolbarEnabledChange,
+  indoorEnabled = true,
+  onIndoorEnabledChange,
+  indoorLevelPickerEnabled = true,
+  onIndoorLevelPickerEnabledChange,
+  rotateGesturesEnabled = true,
+  onRotateGesturesEnabledChange,
+  scrollGesturesEnabled = true,
+  onScrollGesturesEnabledChange,
+  scrollGesturesDuringRotateOrZoomEnabled = true,
+  onScrollGesturesDuringRotateOrZoomEnabledChange,
+  tiltGesturesEnabled = true,
+  onTiltGesturesEnabledChange,
+  zoomControlsEnabled = true,
+  onZoomControlsEnabledChange,
+  zoomGesturesEnabled = true,
+  onZoomGesturesEnabledChange,
+}) => {
   const mapTypeOptions = ['None', 'Normal', 'Satellite', 'Terrain', 'Hybrid'];
   const colorSchemeOptions = ['Follow System', 'Light', 'Dark'];
   const colorSchemeIndex =
@@ -64,7 +114,6 @@ const MapsControls = ({
         : 0;
   const colorSchemeLabel = colorSchemeOptions[colorSchemeIndex];
   const [zoom, setZoom] = useState<number | null>(null);
-  const [enableLocationMarker, setEnableLocationMarker] = useState(true);
   const [latitude, onLatChanged] = useState('');
   const [longitude, onLngChanged] = useState('');
   const [customPaddingEnabled, setCustomPaddingEnabled] = useState(false);
@@ -76,9 +125,7 @@ const MapsControls = ({
   }, [mapViewController, zoom]);
 
   const setMyLocationButtonEnabled = (isOn: boolean) => {
-    log(`setMyLocationButtonEnabled: ${isOn}`);
-    mapViewController.setMyLocationEnabled(isOn);
-    mapViewController.setMyLocationButtonEnabled(isOn);
+    onMyLocationChange?.(isOn, isOn);
   };
 
   const moveCamera = () => {
@@ -90,9 +137,25 @@ const MapsControls = ({
     });
   };
 
-  const setMapType = (mapType: MapType) => {
-    log(`setMapType: ${mapType}`);
-    mapViewController.setMapType(mapType);
+  const setMapType = (newMapType: MapType) => {
+    onMapTypeChange?.(newMapType);
+  };
+
+  const getMapTypeToDropdownIndex = (type: MapType) => {
+    switch (type) {
+      case MapType.NONE:
+        return 0;
+      case MapType.NORMAL:
+        return 1;
+      case MapType.SATELLITE:
+        return 2;
+      case MapType.TERRAIN:
+        return 3;
+      case MapType.HYBRID:
+        return 4;
+      default:
+        return 1;
+    }
   };
 
   const getDropdownIndexToMapType = (index: number) => {
@@ -115,48 +178,62 @@ const MapsControls = ({
 
   const getCameraPositionClicked = async () => {
     const result = await mapViewController.getCameraPosition();
-    log(`Camera position: ${JSON.stringify(result)}`);
+    showSnackbar(
+      `Camera: ${result.target.lat.toFixed(4)}, ${result.target.lng.toFixed(4)} zoom:${result.zoom}`
+    );
   };
 
   const getUiSettings = async () => {
     const result = await mapViewController.getUiSettings();
-    log(`UI Settings: ${JSON.stringify(result)}`);
+    showSnackbar(
+      `UI Settings:\n` +
+        `- Compass: ${result.isCompassEnabled}\n` +
+        `- Map Toolbar: ${result.isMapToolbarEnabled}\n` +
+        `- Indoor Picker: ${result.isIndoorLevelPickerEnabled}\n` +
+        `- Rotate: ${result.isRotateGesturesEnabled}\n` +
+        `- Scroll: ${result.isScrollGesturesEnabled}\n` +
+        `- Scroll (rotate/zoom): ${result.isScrollGesturesEnabledDuringRotateOrZoom}\n` +
+        `- Tilt: ${result.isTiltGesturesEnabled}\n` +
+        `- Zoom Controls: ${result.isZoomControlsEnabled}\n` +
+        `- Zoom Gestures: ${result.isZoomGesturesEnabled}`,
+      5000,
+      true,
+      12
+    );
   };
 
   const getIsMyLocationEnabled = async () => {
     const result = await mapViewController.isMyLocationEnabled();
-    log(`My location enabled: ${result}`);
+    showSnackbar(`My location enabled: ${result}`);
   };
 
   const getMyLocation = async () => {
-    try {
-      const result = await mapViewController.getMyLocation();
-      log(`My location: ${JSON.stringify(result)}`);
-    } catch (error) {
-      log(`Error getting location: ${error}`);
+    const result = await mapViewController.getMyLocation();
+    if (result) {
+      showSnackbar(
+        `My location: ${result.lat.toFixed(4)}, ${result.lng.toFixed(4)}`
+      );
+    } else {
+      showSnackbar('My location not available');
     }
   };
 
   const addMarker = async (imgPath?: string) => {
-    try {
-      const cameraPosition = await mapViewController.getCameraPosition();
+    const cameraPosition = await mapViewController.getCameraPosition();
 
-      const marker: Marker = await mapViewController.addMarker({
-        position: cameraPosition.target,
-        visible: true,
-        title: 'Marker test',
-        snippet: 'Marker test',
-        alpha: 0.8,
-        rotation: 0,
-        flat: false,
-        draggable: true,
-        imgPath: imgPath,
-      });
+    const marker: Marker = await mapViewController.addMarker({
+      position: cameraPosition.target,
+      visible: true,
+      title: 'Marker test',
+      snippet: 'Marker test',
+      alpha: 0.8,
+      rotation: 0,
+      flat: false,
+      draggable: true,
+      imgPath: imgPath,
+    });
 
-      log(`Added marker: ${marker.id}`);
-    } catch (error) {
-      log(`Error adding marker: ${error}`);
-    }
+    showSnackbar(`Marker added: ${marker.id}`);
   };
 
   const addCustomMarker = async () => {
@@ -164,78 +241,117 @@ const MapsControls = ({
   };
 
   const addCircle = async () => {
-    try {
-      const cameraPosition = await mapViewController.getCameraPosition();
+    const cameraPosition = await mapViewController.getCameraPosition();
 
-      const circle: Circle = await mapViewController.addCircle({
-        center: cameraPosition.target,
-        radius: 100,
-        fillColor: '#FFFFFF',
-        strokeColor: '#000000',
-        strokeWidth: 5,
-        visible: true,
-        clickable: true,
-      });
+    const circle: Circle = await mapViewController.addCircle({
+      center: cameraPosition.target,
+      radius: 100,
+      fillColor: '#FFFFFF',
+      strokeColor: '#000000',
+      strokeWidth: 5,
+      visible: true,
+      clickable: true,
+    });
 
-      log(`Added circle: ${circle.id}`);
-    } catch (error) {
-      log(`Error adding circle: ${error}`);
-    }
+    showSnackbar(`Circle added: ${circle.id}`);
   };
 
   const addPolyline = async () => {
-    try {
-      const cameraPosition = await mapViewController.getCameraPosition();
+    const cameraPosition = await mapViewController.getCameraPosition();
 
-      const latLngs = [];
+    const latLngs = [];
 
-      for (let idx = 0; idx < 100; idx++) {
-        latLngs.push({
-          lat: cameraPosition.target.lat + idx / 10000,
-          lng: cameraPosition.target.lng + idx / 10000,
-        });
-      }
-
-      const polyline: Polyline = await mapViewController.addPolyline({
-        points: latLngs,
-        width: 10,
-        color: '#f52525',
-        visible: true,
-        clickable: true,
+    for (let idx = 0; idx < 100; idx++) {
+      latLngs.push({
+        lat: cameraPosition.target.lat + idx / 10000,
+        lng: cameraPosition.target.lng + idx / 10000,
       });
-
-      log(`Added polyline: ${polyline.id}`);
-    } catch (error) {
-      log(`Error adding polyline: ${error}`);
     }
+
+    const polyline: Polyline = await mapViewController.addPolyline({
+      points: latLngs,
+      width: 10,
+      color: 'rgba(0,0,255,0.7)',
+      visible: true,
+      clickable: true,
+    });
+
+    showSnackbar(`Polyline added: ${polyline.id}`);
   };
 
   const addPolygon = async () => {
-    try {
-      const cameraPosition = await mapViewController.getCameraPosition();
-      const cameraLat = cameraPosition.target.lat;
-      const cameraLng = cameraPosition.target.lng;
-      const delta = 0.05;
-      const bermudaTriangle = [
-        { lat: cameraLat - delta, lng: cameraLng - delta },
-        { lat: cameraLat - delta, lng: cameraLng + delta },
-        { lat: cameraLat + delta, lng: cameraLng + delta },
-        { lat: cameraLat - delta, lng: cameraLng - delta },
-      ];
+    const cameraPosition = await mapViewController.getCameraPosition();
+    const cameraLat = cameraPosition.target.lat;
+    const cameraLng = cameraPosition.target.lng;
+    const delta = 0.05;
+    const bermudaTriangle = [
+      { lat: cameraLat - delta, lng: cameraLng - delta },
+      { lat: cameraLat - delta, lng: cameraLng + delta },
+      { lat: cameraLat + delta, lng: cameraLng + delta },
+      { lat: cameraLat - delta, lng: cameraLng - delta },
+    ];
 
-      const polygon: Polygon = await mapViewController.addPolygon({
-        strokeColor: '#FF00FF',
-        fillColor: '#f52525',
-        strokeWidth: 10,
-        visible: true,
-        points: bermudaTriangle,
+    const polygon: Polygon = await mapViewController.addPolygon({
+      strokeColor: '#ff66',
+      fillColor: '#f52525',
+      strokeWidth: 10,
+      visible: true,
+      points: bermudaTriangle,
+      clickable: true,
+    });
+
+    showSnackbar(`Polygon added: ${polygon.id}`);
+  };
+
+  /**
+   * Add a ground overlay using location-based positioning.
+   * This uses a location with width/height in meters.
+   * Note: On iOS, zoomLevel is required for location-based overlays.
+   */
+  const addGroundOverlayWithPosition = async () => {
+    const cameraPosition = await mapViewController.getCameraPosition();
+
+    const groundOverlay: GroundOverlay =
+      await mapViewController.addGroundOverlay({
+        imgPath: 'circle.png',
+        location: cameraPosition.target,
+        width: 500, // 500 meters width
+        height: 500, // 500 meters height (optional - preserves aspect ratio if omitted)
+        zoomLevel: 14, // Required for iOS, optional for Android
+        bearing: 0,
+        transparency: 0.3, // 30% transparent
         clickable: true,
+        visible: true,
       });
 
-      log(`Added polygon: ${polygon.id}`);
-    } catch (error) {
-      log(`Error adding polygon: ${error}`);
-    }
+    showSnackbar(`Ground overlay added: ${groundOverlay.id}`);
+  };
+
+  /**
+   * Add a ground overlay using bounds-based positioning.
+   * This stretches the overlay to fit within the specified LatLngBounds.
+   * This is the most reliable cross-platform method.
+   */
+  const addGroundOverlayWithBounds = async () => {
+    const cameraPosition = await mapViewController.getCameraPosition();
+    const cameraLat = cameraPosition.target.lat;
+    const cameraLng = cameraPosition.target.lng;
+    const delta = 0.005; // Approximately 500m at mid-latitudes
+
+    const groundOverlay: GroundOverlay =
+      await mapViewController.addGroundOverlay({
+        imgPath: 'circle.png',
+        bounds: {
+          southWest: { lat: cameraLat - delta, lng: cameraLng - delta },
+          northEast: { lat: cameraLat + delta, lng: cameraLng + delta },
+        },
+        bearing: 0,
+        transparency: 0.3, // 30% transparent
+        clickable: true,
+        visible: true,
+      });
+
+    showSnackbar(`Ground overlay added: ${groundOverlay.id}`);
   };
 
   const clearMapView = () => {
@@ -317,6 +433,14 @@ const MapsControls = ({
         <ExampleAppButton title="Add circle" onPress={addCircle} />
         <ExampleAppButton title="Add polyline" onPress={addPolyline} />
         <ExampleAppButton title="Add polygon" onPress={addPolygon} />
+        <ExampleAppButton
+          title="Add ground overlay (position)"
+          onPress={addGroundOverlayWithPosition}
+        />
+        <ExampleAppButton
+          title="Add ground overlay (bounds)"
+          onPress={addGroundOverlayWithBounds}
+        />
         <ExampleAppButton title="Clear map view" onPress={clearMapView} />
       </Accordion>
 
@@ -326,6 +450,7 @@ const MapsControls = ({
           <Text style={ControlStyles.rowLabel}>Map type</Text>
           <SelectDropdown
             data={mapTypeOptions}
+            defaultValueByIndex={getMapTypeToDropdownIndex(mapType)}
             onSelect={(_selectedItem, index) => {
               setMapType(getDropdownIndexToMapType(index));
             }}
@@ -399,11 +524,40 @@ const MapsControls = ({
         <View style={ControlStyles.rowContainer}>
           <Text style={ControlStyles.rowLabel}>Location marker</Text>
           <ExampleAppButton
-            title={enableLocationMarker ? 'Disable' : 'Enable'}
+            title={myLocationEnabled ? 'Disable' : 'Enable'}
             onPress={() => {
-              setEnableLocationMarker(!enableLocationMarker);
-              setMyLocationButtonEnabled(!enableLocationMarker);
+              setMyLocationButtonEnabled(!myLocationEnabled);
             }}
+          />
+        </View>
+        <View style={ControlStyles.rowContainer}>
+          <Text style={ControlStyles.rowLabel}>Compass</Text>
+          <ExampleAppButton
+            title={compassEnabled ? 'Disable' : 'Enable'}
+            onPress={() => onCompassEnabledChange?.(!compassEnabled)}
+          />
+        </View>
+        <View style={ControlStyles.rowContainer}>
+          <Text style={ControlStyles.rowLabel}>Map Toolbar</Text>
+          <ExampleAppButton
+            title={mapToolbarEnabled ? 'Disable' : 'Enable'}
+            onPress={() => onMapToolbarEnabledChange?.(!mapToolbarEnabled)}
+          />
+        </View>
+        <View style={ControlStyles.rowContainer}>
+          <Text style={ControlStyles.rowLabel}>Indoor Maps</Text>
+          <ExampleAppButton
+            title={indoorEnabled ? 'Disable' : 'Enable'}
+            onPress={() => onIndoorEnabledChange?.(!indoorEnabled)}
+          />
+        </View>
+        <View style={ControlStyles.rowContainer}>
+          <Text style={ControlStyles.rowLabel}>Indoor Picker</Text>
+          <ExampleAppButton
+            title={indoorLevelPickerEnabled ? 'Disable' : 'Enable'}
+            onPress={() =>
+              onIndoorLevelPickerEnabledChange?.(!indoorLevelPickerEnabled)
+            }
           />
         </View>
         <ExampleAppButton title="Get UI Settings" onPress={getUiSettings} />
@@ -412,6 +566,62 @@ const MapsControls = ({
           title="Get My location enabled"
           onPress={getIsMyLocationEnabled}
         />
+      </Accordion>
+
+      {/* Gestures */}
+      <Accordion title="Gesture Settings">
+        <View style={ControlStyles.rowContainer}>
+          <Text style={ControlStyles.rowLabel}>Rotate gestures</Text>
+          <ExampleAppButton
+            title={rotateGesturesEnabled ? 'Disable' : 'Enable'}
+            onPress={() =>
+              onRotateGesturesEnabledChange?.(!rotateGesturesEnabled)
+            }
+          />
+        </View>
+        <View style={ControlStyles.rowContainer}>
+          <Text style={ControlStyles.rowLabel}>Scroll gestures</Text>
+          <ExampleAppButton
+            title={scrollGesturesEnabled ? 'Disable' : 'Enable'}
+            onPress={() =>
+              onScrollGesturesEnabledChange?.(!scrollGesturesEnabled)
+            }
+          />
+        </View>
+        <View style={ControlStyles.rowContainer}>
+          <Text style={ControlStyles.rowLabel}>Scroll during rotate/zoom</Text>
+          <ExampleAppButton
+            title={
+              scrollGesturesDuringRotateOrZoomEnabled ? 'Disable' : 'Enable'
+            }
+            onPress={() =>
+              onScrollGesturesDuringRotateOrZoomEnabledChange?.(
+                !scrollGesturesDuringRotateOrZoomEnabled
+              )
+            }
+          />
+        </View>
+        <View style={ControlStyles.rowContainer}>
+          <Text style={ControlStyles.rowLabel}>Tilt gestures</Text>
+          <ExampleAppButton
+            title={tiltGesturesEnabled ? 'Disable' : 'Enable'}
+            onPress={() => onTiltGesturesEnabledChange?.(!tiltGesturesEnabled)}
+          />
+        </View>
+        <View style={ControlStyles.rowContainer}>
+          <Text style={ControlStyles.rowLabel}>Zoom controls</Text>
+          <ExampleAppButton
+            title={zoomControlsEnabled ? 'Disable' : 'Enable'}
+            onPress={() => onZoomControlsEnabledChange?.(!zoomControlsEnabled)}
+          />
+        </View>
+        <View style={ControlStyles.rowContainer}>
+          <Text style={ControlStyles.rowLabel}>Zoom gestures</Text>
+          <ExampleAppButton
+            title={zoomGesturesEnabled ? 'Disable' : 'Enable'}
+            onPress={() => onZoomGesturesEnabledChange?.(!zoomGesturesEnabled)}
+          />
+        </View>
       </Accordion>
     </View>
   );
