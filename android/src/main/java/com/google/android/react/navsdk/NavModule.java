@@ -14,7 +14,17 @@
 package com.google.android.react.navsdk;
 
 import android.app.Activity;
+import android.app.Application;
+import android.app.Notification;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.Context;
+import android.content.Intent;
 import android.location.Location;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.service.notification.StatusBarNotification;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.lifecycle.LifecycleOwner;
@@ -85,6 +95,12 @@ public class NavModule extends NativeNavModuleSpec
   private @Navigator.TaskRemovedBehavior int taskRemovedBehaviour =
       Navigator.TaskRemovedBehavior.CONTINUE_SERVICE;
   private Promise pendingInitPromise;
+
+  private Handler mNotificationHandler;
+  private Runnable mNotificationUpdater;
+  private static final long NOTIFICATION_CHECK_INTERVAL_MS = 3000;
+  private static final String NAV_CHANNEL_ID = "nav_foreground_service_channel";
+  private static final int NAV_NOTIFICATION_ID = 998236;
 
   public interface ModuleReadyListener {
     void onModuleReady();
@@ -167,6 +183,7 @@ public class NavModule extends NativeNavModuleSpec
     }
 
     mIsListeningRoadSnappedLocation = false;
+    stopNavigationNotificationUpdater();
     removeLocationListener();
     removeNavigationListeners();
     mWaypoints.clear();
@@ -272,6 +289,9 @@ public class NavModule extends NativeNavModuleSpec
     // Set abnormal termination reporting
     NavigationApi.setAbnormalTerminationReportingEnabled(abnormalTerminationReportingEnabled);
 
+    // Initialize foreground service manager with custom notification intent before Navigation API
+    initializeForegroundServiceManager();
+
     // Initialize the navigation API
     initializeNavigationApi();
 
@@ -286,6 +306,31 @@ public class NavModule extends NativeNavModuleSpec
                 .observe((LifecycleOwner) currentActivity, navInfoObserver);
           }
         });
+  }
+
+  /**
+   * Initializes the ForegroundServiceManager with a resume intent so tapping the
+   * navigation notification brings the app to the foreground.
+   * This MUST be called before NavigationApi initialization.
+   */
+  private void initializeForegroundServiceManager() {
+    Context context = getReactApplicationContext();
+    Application app = (Application) context.getApplicationContext();
+
+    Intent resumeIntent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
+    if (resumeIntent == null) {
+      resumeIntent = new Intent();
+    }
+    resumeIntent.setAction(Intent.ACTION_MAIN);
+    resumeIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+    resumeIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+
+    try {
+      NavigationApi.clearForegroundServiceManager();
+      NavigationApi.initForegroundServiceManagerMessageAndIntent(app, NAV_NOTIFICATION_ID, null, resumeIntent);
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
   }
 
   private void onNavigationReady() {
@@ -674,6 +719,73 @@ public class NavModule extends NativeNavModuleSpec
     promise.resolve(true);
   }
 
+  /**
+   * Starts a periodic check that injects a contentIntent into the Navigation SDK's
+   * foreground-service notification so tapping it brings the app to the foreground.
+   * The SDK rebuilds the notification on every turn-by-turn update, so we re-apply
+   * the intent on a short interval while guidance is active.
+   */
+  private void startNavigationNotificationUpdater() {
+    stopNavigationNotificationUpdater();
+    mNotificationHandler = new Handler(Looper.getMainLooper());
+    mNotificationUpdater = new Runnable() {
+      @Override
+      public void run() {
+        patchNavigationNotificationIntent();
+        if (mNotificationHandler != null) {
+          mNotificationHandler.postDelayed(this, NOTIFICATION_CHECK_INTERVAL_MS);
+        }
+      }
+    };
+    mNotificationHandler.postDelayed(mNotificationUpdater, 1500);
+  }
+
+  private void stopNavigationNotificationUpdater() {
+    if (mNotificationHandler != null && mNotificationUpdater != null) {
+      mNotificationHandler.removeCallbacks(mNotificationUpdater);
+    }
+    mNotificationHandler = null;
+    mNotificationUpdater = null;
+  }
+
+  private void patchNavigationNotificationIntent() {
+    if (reactContext == null) return;
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
+
+    try {
+      NotificationManager nm =
+          (NotificationManager) reactContext.getSystemService(Context.NOTIFICATION_SERVICE);
+      if (nm == null) return;
+
+      Intent launchIntent = reactContext.getPackageManager()
+          .getLaunchIntentForPackage(reactContext.getPackageName());
+      if (launchIntent == null) return;
+      launchIntent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+
+      PendingIntent pendingIntent = PendingIntent.getActivity(
+          reactContext, 0, launchIntent,
+          PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+      for (StatusBarNotification sbn : nm.getActiveNotifications()) {
+        Notification notification = sbn.getNotification();
+
+        String channelId = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+            ? notification.getChannelId() : null;
+
+        boolean isNavNotification = NAV_CHANNEL_ID.equals(channelId)
+            || ("default".equals(channelId)
+                && (notification.flags & Notification.FLAG_ONGOING_EVENT) != 0);
+
+        if (isNavNotification) {
+          notification.contentIntent = pendingIntent;
+          nm.notify(sbn.getTag(), sbn.getId(), notification);
+        }
+      }
+    } catch (Exception e) {
+      // Silently fail – bringing app to foreground on tap is a nice-to-have
+    }
+  }
+
   @Override
   public void startGuidance(final Promise promise) {
     if (!ensureNavigatorAvailable(promise)) {
@@ -685,6 +797,7 @@ public class NavModule extends NativeNavModuleSpec
     }
 
     mNavigator.startGuidance();
+    startNavigationNotificationUpdater();
     emitOnStartGuidance();
     promise.resolve(true);
   }
@@ -695,6 +808,7 @@ public class NavModule extends NativeNavModuleSpec
       return;
     }
     mNavigator.stopGuidance();
+    stopNavigationNotificationUpdater();
     promise.resolve(true);
   }
 
