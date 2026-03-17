@@ -15,6 +15,8 @@ package com.google.android.react.navsdk;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.os.Handler;
+import android.os.Looper;
 import androidx.core.util.Supplier;
 import com.facebook.react.bridge.UiThreadUtil;
 import com.google.android.gms.maps.CameraUpdateFactory;
@@ -22,6 +24,7 @@ import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.model.BitmapDescriptor;
 import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 import com.google.android.gms.maps.model.CameraPosition;
+import com.google.android.gms.maps.model.FollowMyLocationOptions;
 import com.google.android.gms.maps.model.Circle;
 import com.google.android.gms.maps.model.CircleOptions;
 import com.google.android.gms.maps.model.GroundOverlay;
@@ -72,6 +75,11 @@ public class MapViewController implements INavigationViewControllerProperties {
   // Zoom level preferences (-1 means use map's current value)
   private Float minZoomLevelPreference = null;
   private Float maxZoomLevelPreference = null;
+
+  private Integer currentFollowingPerspective = null;
+  private static final long FOLLOW_ANIMATION_SETTLE_MS = 1000;
+  private final Handler followHandler = new Handler(Looper.getMainLooper());
+  private Runnable pendingZoomLockRunnable = null;
 
   public void initialize(GoogleMap googleMap, Supplier<Activity> activitySupplier) {
     this.mGoogleMap = googleMap;
@@ -914,6 +922,8 @@ public class MapViewController implements INavigationViewControllerProperties {
     // Use map's current minZoomLevel if -1 is provided
     float effectiveMin = (minZoomLevel < 0.0f) ? mGoogleMap.getMinZoomLevel() : minZoomLevel;
     mGoogleMap.setMinZoomPreference(effectiveMin);
+
+    applyOrDeferFollowMyLocation();
   }
 
   @Override
@@ -939,6 +949,8 @@ public class MapViewController implements INavigationViewControllerProperties {
     // Use map's current maxZoomLevel if -1 is provided
     float effectiveMax = (maxZoomLevel < 0.0f) ? mGoogleMap.getMaxZoomLevel() : maxZoomLevel;
     mGoogleMap.setMaxZoomPreference(effectiveMax);
+
+    applyOrDeferFollowMyLocation();
   }
 
   public void setZoomGesturesEnabled(boolean enabled) {
@@ -1028,7 +1040,71 @@ public class MapViewController implements INavigationViewControllerProperties {
       return;
     }
 
-    mGoogleMap.followMyLocation(EnumTranslationUtil.getCameraPerspectiveFromJsValue(jsValue));
+    currentFollowingPerspective = jsValue;
+    int perspective = EnumTranslationUtil.getCameraPerspectiveFromJsValue(jsValue);
+
+    // Always use the single-parameter overload for smooth camera animation.
+    mGoogleMap.followMyLocation(perspective);
+
+    // If zoom is locked, defer the zoom-constrained re-application so
+    // the smooth follow animation is not interrupted.
+    if (getLockedZoomLevel() != null) {
+      scheduleFollowMyLocationUpdate();
+    }
+  }
+
+  private Float getLockedZoomLevel() {
+    if (minZoomLevelPreference != null
+        && maxZoomLevelPreference != null
+        && minZoomLevelPreference >= 0.0f
+        && maxZoomLevelPreference >= 0.0f
+        && Float.compare(minZoomLevelPreference, maxZoomLevelPreference) == 0) {
+      return minZoomLevelPreference;
+    }
+    return null;
+  }
+
+  private void scheduleFollowMyLocationUpdate() {
+    if (pendingZoomLockRunnable != null) {
+      followHandler.removeCallbacks(pendingZoomLockRunnable);
+    }
+    pendingZoomLockRunnable =
+        () -> {
+          applyFollowMyLocation();
+          pendingZoomLockRunnable = null;
+        };
+    followHandler.postDelayed(pendingZoomLockRunnable, FOLLOW_ANIMATION_SETTLE_MS);
+  }
+
+  /**
+   * If a follow animation is in progress (pending zoom lock), reschedule so it picks up the
+   * updated zoom values without interrupting the animation. Otherwise apply immediately.
+   */
+  private void applyOrDeferFollowMyLocation() {
+    if (pendingZoomLockRunnable != null) {
+      scheduleFollowMyLocationUpdate();
+    } else {
+      applyFollowMyLocation();
+    }
+  }
+
+  @SuppressLint("MissingPermission")
+  private void applyFollowMyLocation() {
+    if (mGoogleMap == null || currentFollowingPerspective == null) {
+      return;
+    }
+
+    int perspective =
+        EnumTranslationUtil.getCameraPerspectiveFromJsValue(currentFollowingPerspective);
+    Float lockedZoom = getLockedZoomLevel();
+
+    if (lockedZoom != null) {
+      FollowMyLocationOptions options =
+          FollowMyLocationOptions.builder().setZoomLevel(lockedZoom).build();
+      mGoogleMap.followMyLocation(perspective, options);
+    } else {
+      mGoogleMap.followMyLocation(perspective);
+    }
   }
 
   public void setPadding(int top, int left, int bottom, int right) {
